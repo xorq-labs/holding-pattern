@@ -11,20 +11,25 @@
 
     uv2nix = {
       url = "github:pyproject-nix/uv2nix";
-      inputs.pyproject-nix.follows = "pyproject-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        pyproject-nix.follows = "pyproject-nix";
+        nixpkgs.follows = "nixpkgs";
+      };
     };
 
     pyproject-build-systems = {
       url = "github:pyproject-nix/build-system-pkgs";
-      inputs.pyproject-nix.follows = "pyproject-nix";
-      inputs.uv2nix.follows = "uv2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        pyproject-nix.follows = "pyproject-nix";
+        uv2nix.follows = "uv2nix";
+        nixpkgs.follows = "nixpkgs";
+      };
     };
   };
 
   outputs =
     {
+      self,
       nixpkgs,
       pyproject-nix,
       uv2nix,
@@ -34,64 +39,94 @@
     let
       inherit (nixpkgs) lib;
       forAllSystems = lib.genAttrs lib.systems.flakeExposed;
-
-      workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./.; };
-
-      overlay = workspace.mkPyprojectOverlay {
-        sourcePreference = "wheel";
-      };
-
-      editableOverlay = workspace.mkEditablePyprojectOverlay {
-        root = "$REPO_ROOT";
-      };
-
-      pythonSets = forAllSystems (
+      perSystem = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          python = pkgs.python3;
-        in
-        (pkgs.callPackage pyproject-nix.build.packages {
-          inherit python;
-        }).overrideScope
-          (
-            lib.composeManyExtensions [
-              pyproject-build-systems.overlays.wheel
-              overlay
-            ]
-          )
-      );
-
-    in
-    {
-      devShells = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          pythonSet = pythonSets.${system}.overrideScope editableOverlay;
-          virtualenv = pythonSet.mkVirtualEnv "hello-world-dev-env" workspace.deps.all;
+          uvLib = import ./nix/uvLib.nix {
+            inherit
+              pkgs
+              uv2nix
+              pyproject-nix
+              pyproject-build-systems
+              ;
+          };
+          python = pkgs.python312;
+          sharedArgs = {
+            workspaceRoot = ./.;
+            inherit python;
+          };
+          pythonSet = uvLib.mkPythonSet sharedArgs;
+          virtualenv-all = uvLib.mkVirtualEnv (
+            sharedArgs
+            // {
+              which-deps = "all";
+              name = "holding-pattern-env-all";
+            }
+          );
+          virtualenv-default = uvLib.mkVirtualEnv (
+            sharedArgs
+            // {
+              which-deps = "default";
+              name = "holding-pattern-env-default";
+            }
+          );
+          virtualenv-all-editable = uvLib.mkVirtualEnv (
+            sharedArgs
+            // {
+              which-deps = "all";
+              useEditableOverlay = true;
+              name = "holding-pattern-env-editable-all";
+            }
+          );
         in
         {
-          default = pkgs.mkShell {
-            packages = [
-              virtualenv
-              pkgs.uv
-            ];
-            env = {
-              UV_NO_SYNC = "1";
-              UV_PYTHON = pythonSet.python.interpreter;
-              UV_PYTHON_DOWNLOADS = "never";
-            };
-            shellHook = ''
-              unset PYTHONPATH
-              export REPO_ROOT=$(git rev-parse --show-toplevel)
-            '';
-          };
+          inherit
+            pkgs
+            python
+            uvLib
+            pythonSet
+            virtualenv-all
+            virtualenv-default
+            virtualenv-all-editable
+            ;
         }
       );
-
-      packages = forAllSystems (system: {
-        default = pythonSets.${system}.mkVirtualEnv "hello-world-env" workspace.deps.default;
-      });
+    in
+    {
+      formatter = forAllSystems (system: perSystem.${system}.pkgs.nixfmt-tree);
+      apps = forAllSystems (
+        system: with perSystem.${system}; {
+          python = {
+            type = "app";
+            program = "${virtualenv-all}/bin/python";
+          };
+          default = self.apps.${system}.python;
+        }
+      );
+      lib = forAllSystems (system: perSystem.${system});
+      devShells = forAllSystems (
+        system: with perSystem.${system}; {
+          nonEditable = uvLib.mkUvShell {
+            virtualenv = virtualenv-all;
+            inherit pythonSet;
+          };
+          editable = uvLib.mkUvShell {
+            virtualenv = virtualenv-all-editable;
+            inherit pythonSet;
+          };
+          default = self.devShells.${system}.editable;
+        }
+      );
+      packages = forAllSystems (
+        system: with perSystem.${system}; {
+          inherit
+            virtualenv-all
+            virtualenv-default
+            virtualenv-all-editable
+            ;
+          default = virtualenv-default;
+        }
+      );
     };
 }
