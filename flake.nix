@@ -101,6 +101,14 @@
             type = "app";
             program = "${virtualenv-all}/bin/python";
           };
+          celery = {
+            type = "app";
+            program = "${virtualenv-all}/bin/celery";
+          };
+          flask = {
+            type = "app";
+            program = "${virtualenv-all}/bin/flask";
+          };
           default = self.apps.${system}.python;
         }
       );
