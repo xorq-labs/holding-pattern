@@ -5,7 +5,9 @@
   pyproject-build-systems,
 }:
 let
-  nopOverrides = _final: _prev: { };
+  nopOverrides = addResolvedMatrix {
+    hatchling = [ "xorq" ];
+  };
   addNativeBuildInputs =
     drvs:
     (old: {
@@ -136,6 +138,7 @@ let
 in
 {
   inherit
+    nopOverrides
     addNativeBuildInputs
     addBuildInputs
     addResolved
