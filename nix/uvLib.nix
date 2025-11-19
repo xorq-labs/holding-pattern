@@ -76,11 +76,13 @@ let
             pkgs.lib.composeManyExtensions (
               [
                 pyproject-build-systems.overlays.default
-                (addResolvedMatrix resolvedMatrix)
-                otherOverrides
               ]
               ++ (pkgs.lib.optionals useWheelOverlay [ wheelOverlay ])
               ++ (pkgs.lib.optionals useEditableOverlay [ editableOverlay ])
+              ++ [
+                (addResolvedMatrix resolvedMatrix)
+                otherOverrides
+              ]
             )
           );
     in
