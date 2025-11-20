@@ -6,7 +6,9 @@
 
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+      };
     };
 
     uv2nix = {
@@ -43,6 +45,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          python = pkgs.python312;
           uvLib = import ./nix/uvLib.nix {
             inherit
               pkgs
@@ -51,27 +54,28 @@
               pyproject-build-systems
               ;
           };
-          python = pkgs.python312;
+          imageLib = import ./nix/imageLib.nix { inherit pkgs uvLib; };
+          cliLib = import ./nix/cliLib.nix { inherit self pkgs; };
           sharedArgs = {
             workspaceRoot = ./.;
             inherit python;
           };
           pythonSet = uvLib.mkPythonSet sharedArgs;
-          virtualenv-all = uvLib.mkVirtualEnv (
+          virtualEnv-all = uvLib.mkVirtualEnv (
             sharedArgs
             // {
               which-deps = "all";
               name = "holding-pattern-env-all";
             }
           );
-          virtualenv-default = uvLib.mkVirtualEnv (
+          virtualEnv-default = uvLib.mkVirtualEnv (
             sharedArgs
             // {
               which-deps = "default";
               name = "holding-pattern-env-default";
             }
           );
-          virtualenv-all-editable = uvLib.mkVirtualEnv (
+          virtualEnv-all-editable = uvLib.mkVirtualEnv (
             sharedArgs
             // {
               which-deps = "all";
@@ -81,14 +85,25 @@
           );
         in
         {
+          inherit (imageLib)
+            tgzToImage
+            ;
+          inherit (cliLib)
+            xorq-nix-eval-raw
+            xorq-docker-run-nix-build-tgz
+            xorq-tgz-to-store
+            xorq-tgzify-repo
+            xorq-docker-volume-cat
+            ;
           inherit
             pkgs
             python
             uvLib
+            imageLib
             pythonSet
-            virtualenv-all
-            virtualenv-default
-            virtualenv-all-editable
+            virtualEnv-all
+            virtualEnv-default
+            virtualEnv-all-editable
             ;
         }
       );
@@ -99,42 +114,51 @@
         system: with perSystem.${system}; {
           python = {
             type = "app";
-            program = "${virtualenv-all}/bin/python";
+            program = "${virtualEnv-all}/bin/python";
           };
           celery = {
             type = "app";
-            program = "${virtualenv-all}/bin/celery";
+            program = "${virtualEnv-all}/bin/celery";
           };
           flask = {
             type = "app";
-            program = "${virtualenv-all}/bin/flask";
+            program = "${virtualEnv-all}/bin/flask";
           };
           default = self.apps.${system}.python;
         }
       );
       lib = forAllSystems (system: perSystem.${system});
       devShells = forAllSystems (
-        system: with perSystem.${system}; {
-          nonEditable = uvLib.mkUvShell {
-            virtualenv = virtualenv-all;
+        system:
+        with perSystem.${system};
+        let
+          commonArgs = {
             inherit pythonSet;
+            otherPackages = [
+              pkgs.redis
+              xorq-nix-eval-raw
+              xorq-docker-run-nix-build-tgz
+              xorq-tgz-to-store
+              xorq-tgzify-repo
+              xorq-docker-volume-cat
+            ];
           };
-          editable = uvLib.mkUvShell {
-            virtualenv = virtualenv-all-editable;
-            inherit pythonSet;
-          };
+        in
+        {
+          editable = uvLib.mkUvShell (commonArgs // { virtualenv = virtualEnv-all-editable; });
+          nonEditable = uvLib.mkUvShell (commonArgs // { virtualenv = virtualEnv-all; });
           default = self.devShells.${system}.editable;
         }
       );
-      packages = forAllSystems (
-        system: with perSystem.${system}; {
-          inherit
-            virtualenv-all
-            virtualenv-default
-            virtualenv-all-editable
-            ;
-          default = virtualenv-default;
-        }
-      );
+      packages = forAllSystems (system: {
+        inherit (perSystem.${system})
+          tgzToDrv
+          tgzToImage
+          virtualEnv-all
+          xorq-tgz-to-store
+          xorq-docker-volume-cat
+          ;
+        default = self.packages.${system}.virtualEnv-all;
+      });
     };
 }

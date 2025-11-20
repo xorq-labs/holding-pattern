@@ -114,29 +114,31 @@ let
       virtualEnv = pythonSet.mkVirtualEnv name workspace.deps.${which-deps};
     in
     virtualEnv;
-  mkUvShell = {
-    virtualenv,
-    pythonSet,
-    otherPackages ? [ ],
-  }:
-  let
-    uvShell = pkgs.mkShell {
-      packages = [
-        virtualenv
-        pkgs.uv
-      ] ++ otherPackages;
-      env = {
-        UV_NO_SYNC = "1";
-        UV_PYTHON = pythonSet.python.interpreter;
-        UV_PYTHON_DOWNLOADS = "never";
+  mkUvShell =
+    {
+      virtualenv,
+      pythonSet,
+      otherPackages ? [ ],
+    }:
+    let
+      uvShell = pkgs.mkShell {
+        packages = [
+          virtualenv
+          pkgs.uv
+        ]
+        ++ otherPackages;
+        env = {
+          UV_NO_SYNC = "1";
+          UV_PYTHON = pythonSet.python.interpreter;
+          UV_PYTHON_DOWNLOADS = "never";
+        };
+        shellHook = ''
+          unset PYTHONPATH
+          export REPO_ROOT=$(git rev-parse --show-toplevel)
+        '';
       };
-      shellHook = ''
-        unset PYTHONPATH
-        export REPO_ROOT=$(git rev-parse --show-toplevel)
-      '';
-    };
-  in
-  uvShell;
+    in
+    uvShell;
 in
 {
   inherit
